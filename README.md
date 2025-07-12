@@ -1,5 +1,5 @@
 # galaxyeducationtest
-galaxyeducationtest
+
 # 🎓 Bài tập Laravel: Giới hạn số lượng request bằng Middleware
 
 ## 🧾 Mục tiêu
@@ -21,5 +21,5 @@ Xây dựng một ứng dụng Laravel đơn giản với chức năng **giới 
 ### 1. Clone dự án hoặc copy mã nguồn
 
 ```bash
-git clone <link-repo> # nếu có
+git clone https://github.com/nguyennam8890/galaxyeducationtest.git
 cd edu-test
