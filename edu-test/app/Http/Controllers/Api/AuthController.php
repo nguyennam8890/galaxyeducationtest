@@ -8,20 +8,20 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
+    // BUG 1: Lưu password plain text, không hash
     public function register(Request $request): JsonResponse
     {
-        // BUG 1: Không validate password đủ mạnh, chỉ cần 1 ký tự
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'max:255', 'unique:users'],
-            'password' => ['required'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'password' => ['required', 'string', 'min:6'],
         ]);
 
-        // BUG 2: Không hash password - lưu plain text vào DB
+        // BUG: Lưu password plain text - KHÔNG dùng Hash::make()
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
@@ -30,39 +30,45 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // BUG 3: Trả về password trong response
         return response()->json([
             'message' => 'Đăng ký thành công',
-            'user' => $user->makeVisible('password'),
+            'user' => $user,
             'token' => $token,
-            'debug_password' => $validated['password'],
         ], 201);
     }
 
+    // BUG 2: So sánh password bằng == thay vì Hash::check
+    // BUG 3: User enumeration - tiết lộ email tồn tại
     public function login(Request $request): JsonResponse
     {
-        // BUG 4: Không validate input login
-        $email = $request->input('email');
-        $password = $request->input('password');
+        $validated = $request->validate([
+            'email' => ['required', 'string', 'email'],
+            'password' => ['required', 'string'],
+        ]);
 
-        $user = User::where('email', $email)->first();
+        $user = User::where('email', $validated['email'])->first();
 
-        // BUG 5: So sánh password plain text, lộ timing attack + không dùng Hash::check
-        if (!$user || $user->password != $password) {
-            // BUG 6: Tiết lộ user có tồn tại hay không (user enumeration)
-            if (!$user) {
-                return response()->json(['message' => 'Email không tồn tại trong hệ thống'], 401);
-            }
-            return response()->json(['message' => 'Mật khẩu không đúng'], 401);
+        // BUG: User enumeration - response khác nhau khi email không tồn tại vs sai password
+        if (!$user) {
+            return response()->json([
+                'message' => 'Email này chưa được đăng ký trong hệ thống',
+            ], 401);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        // BUG: So sánh password bằng == (loose comparison), không dùng Hash::check()
+        if ($user->password == $validated['password']) {
+            $token = $user->createToken('auth_token')->plainTextToken;
+
+            return response()->json([
+                'message' => 'Đăng nhập thành công',
+                'user' => $user,
+                'token' => $token,
+            ]);
+        }
 
         return response()->json([
-            'message' => 'Đăng nhập thành công',
-            'user' => $user,
-            'token' => $token,
-        ]);
+            'message' => 'Mật khẩu không chính xác',
+        ], 401);
     }
 
     public function logout(Request $request): JsonResponse
@@ -79,5 +85,26 @@ class AuthController extends Controller
         return response()->json([
             'user' => $request->user()->load(['enrollments.course', 'instructedCourses']),
         ]);
+    }
+
+    // BUG: Endpoint reset password không verify token đúng cách
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'email' => ['required', 'email'],
+            'new_password' => ['required', 'string', 'min:6'],
+        ]);
+
+        // BUG: Cho phép reset password mà không cần verify email/token
+        $user = User::where('email', $validated['email'])->first();
+
+        if (!$user) {
+            return response()->json(['message' => 'Email không tồn tại'], 404);
+        }
+
+        // BUG: Vẫn lưu plain text
+        $user->update(['password' => $validated['new_password']]);
+
+        return response()->json(['message' => 'Đổi mật khẩu thành công']);
     }
 }
