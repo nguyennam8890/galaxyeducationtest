@@ -47,6 +47,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/courses/{course}/enroll', [EnrollmentController::class, 'enroll']);
     Route::post('/courses/{course}/cancel', [EnrollmentController::class, 'cancel']);
     Route::put('/courses/{course}/progress', [EnrollmentController::class, 'updateProgress']);
+
+    // Export
+    Route::get('/export/users', [\App\Http\Controllers\Api\ExportController::class, 'exportUsers']);
+    Route::get('/export/enrollments', [\App\Http\Controllers\Api\ExportController::class, 'exportEnrollments']);
 });
 
 // Rate limit demo routes

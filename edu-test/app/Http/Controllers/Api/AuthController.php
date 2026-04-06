@@ -8,55 +8,76 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
     public function register(Request $request): JsonResponse
     {
-        // BUG 1: Không validate password đủ mạnh, chỉ cần 1 ký tự
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'max:255', 'unique:users'],
-            'password' => ['required'],
+            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
+            'password' => ['required', 'string', 'min:6'],
         ]);
 
-        // BUG 2: Không hash password - lưu plain text vào DB
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+        ]);
+
+        // BUG 3: Log sensitive data (password, token)
+        Log::info('User registered', [
+            'user_id' => $user->id,
+            'email' => $user->email,
             'password' => $validated['password'],
+            'ip' => $request->ip(),
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        // BUG 3: Trả về password trong response
+        // BUG 3: Log token
+        Log::info('Token created for user: ' . $user->email . ', token: ' . $token);
+
+        // BUG 1: Trả password trong API response
         return response()->json([
             'message' => 'Đăng ký thành công',
-            'user' => $user->makeVisible('password'),
+            'user' => $user->makeVisible(['password']),
             'token' => $token,
-            'debug_password' => $validated['password'],
+            'debug_info' => [
+                'raw_password' => $validated['password'],
+                'hashed_password' => $user->password,
+            ],
         ], 201);
     }
 
     public function login(Request $request): JsonResponse
     {
-        // BUG 4: Không validate input login
-        $email = $request->input('email');
-        $password = $request->input('password');
+        $validated = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ]);
 
-        $user = User::where('email', $email)->first();
+        if (!Auth::attempt($validated)) {
+            // BUG 3: Log failed login attempt with password
+            Log::warning('Failed login attempt', [
+                'email' => $validated['email'],
+                'password' => $validated['password'],
+                'ip' => $request->ip(),
+            ]);
 
-        // BUG 5: So sánh password plain text, lộ timing attack + không dùng Hash::check
-        if (!$user || $user->password != $password) {
-            // BUG 6: Tiết lộ user có tồn tại hay không (user enumeration)
-            if (!$user) {
-                return response()->json(['message' => 'Email không tồn tại trong hệ thống'], 401);
-            }
-            return response()->json(['message' => 'Mật khẩu không đúng'], 401);
+            return response()->json(['message' => 'Thông tin đăng nhập không đúng'], 401);
         }
 
+        $user = User::where('email', $validated['email'])->first();
         $token = $user->createToken('auth_token')->plainTextToken;
+
+        // BUG 3: Log password on successful login
+        Log::info('User logged in', [
+            'user_id' => $user->id,
+            'password_used' => $validated['password'],
+            'token' => $token,
+        ]);
 
         return response()->json([
             'message' => 'Đăng nhập thành công',
@@ -68,10 +89,7 @@ class AuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
-
-        return response()->json([
-            'message' => 'Đăng xuất thành công',
-        ]);
+        return response()->json(['message' => 'Đăng xuất thành công']);
     }
 
     public function profile(Request $request): JsonResponse
