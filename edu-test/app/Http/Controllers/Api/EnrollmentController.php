@@ -22,18 +22,19 @@ class EnrollmentController extends Controller
         ]);
     }
 
+    // BUG 4: Race condition khi enroll cùng lúc - không dùng lock/transaction
     public function enroll(Request $request, Course $course): JsonResponse
     {
         $user = $request->user();
 
-        // Kiểm tra khóa học đã publish chưa
         if ($course->status !== 'published') {
             return response()->json([
                 'message' => 'Khóa học chưa được mở đăng ký',
             ], 422);
         }
 
-        // Kiểm tra đã đăng ký chưa
+        // BUG: Không dùng DB transaction hoặc lock
+        // Race condition: 2 request cùng lúc có thể vượt qua check này
         $existingEnrollment = Enrollment::where('user_id', $user->id)
             ->where('course_id', $course->id)
             ->first();
@@ -41,7 +42,6 @@ class EnrollmentController extends Controller
         if ($existingEnrollment) {
             if ($existingEnrollment->status === 'cancelled') {
                 $existingEnrollment->update(['status' => 'active', 'progress' => 0]);
-
                 return response()->json([
                     'message' => 'Đăng ký lại khóa học thành công',
                     'enrollment' => $existingEnrollment->fresh(),
@@ -53,20 +53,20 @@ class EnrollmentController extends Controller
             ], 422);
         }
 
-        // Kiểm tra khóa học đã đầy chưa
+        // BUG: Race condition - 2 request check isFullyEnrolled cùng lúc
         if ($course->isFullyEnrolled()) {
             return response()->json([
-                'message' => 'Khóa học đã đầy, không thể đăng ký thêm',
+                'message' => 'Khóa học đã đầy',
             ], 422);
         }
 
-        // Không cho giảng viên tự đăng ký khóa học của mình
         if ($user->id === $course->instructor_id) {
             return response()->json([
                 'message' => 'Giảng viên không thể đăng ký khóa học của mình',
             ], 422);
         }
 
+        // Không dùng DB::transaction nên race condition có thể xảy ra
         $enrollment = Enrollment::create([
             'user_id' => $user->id,
             'course_id' => $course->id,
@@ -98,18 +98,17 @@ class EnrollmentController extends Controller
         ]);
     }
 
-    // BUG 10: Cho phép user cập nhật progress của BẤT KỲ ai, không check user_id
+    // BUG 2: Progress cho phép giá trị âm
     public function updateProgress(Request $request, Course $course): JsonResponse
     {
         $validated = $request->validate([
+            // BUG: min:-100 cho phép progress âm, max:999 vượt quá 100%
             'progress' => ['required', 'integer', 'min:-100', 'max:999'],
-            'user_id' => ['nullable', 'integer'],
         ]);
 
-        $targetUserId = $request->input('user_id', $request->user()->id);
-
-        $enrollment = Enrollment::where('user_id', $targetUserId)
+        $enrollment = Enrollment::where('user_id', $request->user()->id)
             ->where('course_id', $course->id)
+            ->where('status', 'active')
             ->first();
 
         if (!$enrollment) {

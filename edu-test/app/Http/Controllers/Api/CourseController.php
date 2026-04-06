@@ -53,6 +53,8 @@ class CourseController extends Controller
             'max_students' => ['nullable', 'integer', 'min:1'],
         ]);
 
+        // BUG 3: Slug không unique - không check trùng slug khi tạo course
+        // Nếu 2 course có cùng title thì slug sẽ trùng nhau
         $validated['slug'] = Str::slug($validated['title']);
         $validated['instructor_id'] = $request->user()->id;
 
