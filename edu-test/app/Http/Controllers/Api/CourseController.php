@@ -27,14 +27,23 @@ class CourseController extends Controller
             $query->where('status', $request->status);
         }
 
-        // BUG 7: SQL Injection - dùng raw query với input user không sanitize
         if ($request->has('search')) {
             $search = $request->search;
-            $query->whereRaw("title LIKE '%" . $search . "%' OR description LIKE '%" . $search . "%'");
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%");
+            });
         }
 
-        // BUG 8: Cho phép user set per_page không giới hạn -> memory exhaustion
-        $courses = $query->paginate($request->get('per_page', 100000));
+        // BUG 2: Nếu all=true thì load tất cả không phân trang
+        if ($request->boolean('all')) {
+            $courses = $query->get();
+            return response()->json(['data' => $courses]);
+        }
+
+        // BUG 3: per_page không giới hạn max - user có thể set per_page=100000
+        $perPage = $request->get('per_page', 15);
+        $courses = $query->paginate($perPage);
 
         return response()->json($courses);
     }
