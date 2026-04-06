@@ -27,15 +27,14 @@ class CourseController extends Controller
             $query->where('status', $request->status);
         }
 
+        // BUG 7: SQL Injection - dùng raw query với input user không sanitize
         if ($request->has('search')) {
             $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%");
-            });
+            $query->whereRaw("title LIKE '%" . $search . "%' OR description LIKE '%" . $search . "%'");
         }
 
-        $courses = $query->paginate($request->get('per_page', 15));
+        // BUG 8: Cho phép user set per_page không giới hạn -> memory exhaustion
+        $courses = $query->paginate($request->get('per_page', 100000));
 
         return response()->json($courses);
     }
@@ -108,22 +107,9 @@ class CourseController extends Controller
         ]);
     }
 
+    // BUG 9: Không kiểm tra quyền - ai cũng xóa được khóa học của người khác
     public function destroy(Request $request, Course $course): JsonResponse
     {
-        if ($request->user()->id !== $course->instructor_id) {
-            return response()->json([
-                'message' => 'Bạn không có quyền xóa khóa học này',
-            ], 403);
-        }
-
-        $activeEnrollments = $course->enrollments()->where('status', 'active')->count();
-
-        if ($activeEnrollments > 0) {
-            return response()->json([
-                'message' => "Không thể xóa khóa học đang có {$activeEnrollments} học viên đang học",
-            ], 422);
-        }
-
         $course->delete();
 
         return response()->json([

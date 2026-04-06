@@ -98,15 +98,18 @@ class EnrollmentController extends Controller
         ]);
     }
 
+    // BUG 10: Cho phép user cập nhật progress của BẤT KỲ ai, không check user_id
     public function updateProgress(Request $request, Course $course): JsonResponse
     {
         $validated = $request->validate([
-            'progress' => ['required', 'integer', 'min:0', 'max:100'],
+            'progress' => ['required', 'integer', 'min:-100', 'max:999'],
+            'user_id' => ['nullable', 'integer'],
         ]);
 
-        $enrollment = Enrollment::where('user_id', $request->user()->id)
+        $targetUserId = $request->input('user_id', $request->user()->id);
+
+        $enrollment = Enrollment::where('user_id', $targetUserId)
             ->where('course_id', $course->id)
-            ->where('status', 'active')
             ->first();
 
         if (!$enrollment) {

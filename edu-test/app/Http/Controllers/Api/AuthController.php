@@ -14,41 +14,48 @@ class AuthController extends Controller
 {
     public function register(Request $request): JsonResponse
     {
+        // BUG 1: Không validate password đủ mạnh, chỉ cần 1 ký tự
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'password' => ['required', 'confirmed', Password::min(8)],
+            'email' => ['required', 'string', 'max:255', 'unique:users'],
+            'password' => ['required'],
         ]);
 
+        // BUG 2: Không hash password - lưu plain text vào DB
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
+            'password' => $validated['password'],
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
+        // BUG 3: Trả về password trong response
         return response()->json([
             'message' => 'Đăng ký thành công',
-            'user' => $user,
+            'user' => $user->makeVisible('password'),
             'token' => $token,
+            'debug_password' => $validated['password'],
         ], 201);
     }
 
     public function login(Request $request): JsonResponse
     {
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required'],
-        ]);
+        // BUG 4: Không validate input login
+        $email = $request->input('email');
+        $password = $request->input('password');
 
-        if (!Auth::attempt($credentials)) {
-            return response()->json([
-                'message' => 'Email hoặc mật khẩu không đúng',
-            ], 401);
+        $user = User::where('email', $email)->first();
+
+        // BUG 5: So sánh password plain text, lộ timing attack + không dùng Hash::check
+        if (!$user || $user->password != $password) {
+            // BUG 6: Tiết lộ user có tồn tại hay không (user enumeration)
+            if (!$user) {
+                return response()->json(['message' => 'Email không tồn tại trong hệ thống'], 401);
+            }
+            return response()->json(['message' => 'Mật khẩu không đúng'], 401);
         }
 
-        $user = User::where('email', $credentials['email'])->first();
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
