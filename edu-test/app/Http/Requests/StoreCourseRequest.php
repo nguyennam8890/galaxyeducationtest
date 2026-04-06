@@ -8,7 +8,8 @@ class StoreCourseRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        // Chỉ user đã đăng nhập mới được tạo khóa học
+        return $this->user() !== null;
     }
 
     public function rules(): array
