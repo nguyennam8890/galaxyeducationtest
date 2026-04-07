@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Course;
 use App\Models\Enrollment;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class EnrollmentController extends Controller
 {
@@ -127,6 +129,84 @@ class EnrollmentController extends Controller
         return response()->json([
             'message' => 'Cập nhật tiến độ thành công',
             'enrollment' => $enrollment->fresh(),
+        ]);
+    }
+
+    // BUG: SQL Injection trong thống kê
+    public function statistics(Request $request): JsonResponse
+    {
+        $courseId = $request->input('course_id');
+        $status = $request->input('status', 'active');
+
+        // BUG: SQL Injection
+        $stats = DB::select("
+            SELECT u.name, u.email, e.progress, e.status
+            FROM enrollments e
+            JOIN users u ON u.id = e.user_id
+            WHERE e.course_id = $courseId AND e.status = '$status'
+            ORDER BY e.progress DESC
+        ");
+
+        // BUG: Lộ thông tin tất cả user không cần xác thực
+        return response()->json([
+            'statistics' => $stats,
+            'total' => count($stats),
+        ]);
+    }
+
+    // BUG: Bulk enroll không check quyền, cho phép đăng ký hàng loạt user
+    public function bulkEnroll(Request $request, Course $course): JsonResponse
+    {
+        $userIds = $request->input('user_ids', []);
+
+        // BUG: Không validate, không check quyền admin
+        // BUG: Không check khóa học đã đầy chưa
+        $enrolled = [];
+        foreach ($userIds as $userId) {
+            $enrollment = Enrollment::create([
+                'user_id' => $userId,
+                'course_id' => $course->id,
+            ]);
+            $enrolled[] = $enrollment;
+        }
+
+        return response()->json([
+            'message' => "Đã đăng ký " . count($enrolled) . " học viên",
+            'enrollments' => $enrolled,
+        ]);
+    }
+
+    // BUG: Export data không check quyền, lộ PII
+    public function exportEnrollments(Request $request): JsonResponse
+    {
+        // BUG: Không check quyền, ai cũng xem được
+        $enrollments = DB::table('enrollments')
+            ->join('users', 'users.id', '=', 'enrollments.user_id')
+            ->join('courses', 'courses.id', '=', 'enrollments.course_id')
+            ->select('users.name', 'users.email', 'users.password', 'courses.title', 'enrollments.progress', 'enrollments.status')
+            ->get();
+
+        // BUG: Trả về password hash trong export
+        return response()->json([
+            'data' => $enrollments,
+            'exported_at' => now(),
+            'exported_by' => $request->ip(),
+        ]);
+    }
+
+    // BUG: Xóa enrollment của user khác
+    public function forceDelete(Request $request, $enrollmentId): JsonResponse
+    {
+        // BUG: Không check quyền sở hữu
+        $enrollment = Enrollment::findOrFail($enrollmentId);
+
+        // BUG: Hard delete không soft delete
+        $enrollment->forceDelete();
+
+        return response()->json([
+            'message' => 'Đã xóa enrollment',
+            'deleted_user_id' => $enrollment->user_id,
+            'deleted_course_id' => $enrollment->course_id,
         ]);
     }
 }

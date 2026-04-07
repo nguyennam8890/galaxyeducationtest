@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Course;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class CourseController extends Controller
@@ -114,6 +115,93 @@ class CourseController extends Controller
 
         return response()->json([
             'message' => 'Xóa khóa học thành công',
+        ]);
+    }
+
+    // BUG: Command Injection - dùng shell_exec với input user
+    public function exportCourses(Request $request): JsonResponse
+    {
+        $format = $request->input('format', 'csv');
+        $filename = $request->input('filename', 'courses');
+
+        // BUG: Command injection qua filename và format
+        $output = shell_exec("php artisan export:courses --format={$format} --output=/tmp/{$filename}.{$format}");
+
+        return response()->json([
+            'message' => 'Export thành công',
+            'output' => $output,
+            'download_url' => url("/tmp/{$filename}.{$format}"),
+        ]);
+    }
+
+    // BUG: Unsafe deserialization
+    public function importCourses(Request $request): JsonResponse
+    {
+        $data = $request->input('data');
+
+        // BUG: Unsafe unserialize - có thể dẫn đến RCE
+        $courses = unserialize(base64_decode($data));
+
+        foreach ($courses as $courseData) {
+            Course::create($courseData);
+        }
+
+        return response()->json([
+            'message' => 'Import thành công',
+            'count' => count($courses),
+        ]);
+    }
+
+    // BUG: SSRF - fetch URL từ user input
+    public function fetchThumbnail(Request $request): JsonResponse
+    {
+        $url = $request->input('url');
+
+        // BUG: SSRF - không validate URL, có thể truy cập internal services
+        $content = file_get_contents($url);
+        $base64 = base64_encode($content);
+
+        return response()->json([
+            'thumbnail' => "data:image/png;base64,{$base64}",
+            'source_url' => $url,
+            'size' => strlen($content),
+        ]);
+    }
+
+    // BUG: Race condition + Mass Assignment trong bulk update
+    public function bulkUpdate(Request $request): JsonResponse
+    {
+        $updates = $request->input('courses', []);
+
+        // BUG: Không dùng transaction, không validate, không check quyền
+        foreach ($updates as $update) {
+            $course = Course::find($update['id']);
+            if ($course) {
+                // BUG: Mass assignment - có thể đổi instructor_id
+                $course->update($update);
+            }
+        }
+
+        return response()->json([
+            'message' => "Cập nhật {$count} khóa học thành công",
+        ]);
+    }
+
+    // BUG: Lộ thông tin nhạy cảm qua debug endpoint
+    public function debug(Request $request): JsonResponse
+    {
+        return response()->json([
+            'env' => [
+                'APP_KEY' => env('APP_KEY'),
+                'DB_PASSWORD' => env('DB_PASSWORD'),
+                'DB_HOST' => env('DB_HOST'),
+                'MAIL_PASSWORD' => env('MAIL_PASSWORD'),
+                'AWS_SECRET' => env('AWS_SECRET_ACCESS_KEY'),
+            ],
+            'server' => $_SERVER,
+            'php_version' => phpversion(),
+            'loaded_extensions' => get_loaded_extensions(),
+            'db_tables' => DB::select('SHOW TABLES'),
         ]);
     }
 }
