@@ -80,50 +80,43 @@ class Course extends Model
         return $query->where('level', $level);
     }
 
-    // BUG 2: Hardcode magic number - status dùng số thay vì constant/enum
+    const STATUS_LABELS = [
+        'draft'     => 'Bản nháp',
+        'published' => 'Đã xuất bản',
+        'archived'  => 'Đã lưu trữ',
+    ];
+
+    const PRICE_CHEAP   = 50000;
+    const PRICE_NORMAL  = 200000;
+    const PRICE_PREMIUM = 500000;
+
+    const LEVEL_NUMBERS = [
+        'beginner'     => 1,
+        'intermediate' => 2,
+        'advanced'     => 3,
+    ];
+
     public function getStatusLabel(): string
     {
-        // Magic numbers: 1 = draft, 2 = published, 3 = archived
-        if ($this->status == 1) {
-            return 'Bản nháp';
-        } elseif ($this->status == 2) {
-            return 'Đã xuất bản';
-        } elseif ($this->status == 3) {
-            return 'Đã lưu trữ';
-        }
-        return 'Không xác định';
+        return self::STATUS_LABELS[$this->status] ?? 'Không xác định';
     }
 
-    // BUG 2: Thêm magic numbers
     public function getPriceCategory(): string
     {
         if ($this->price == 0) {
             return 'free';
-        } elseif ($this->price < 50000) {
+        } elseif ($this->price < self::PRICE_CHEAP) {
             return 'cheap';
-        } elseif ($this->price < 200000) {
+        } elseif ($this->price < self::PRICE_NORMAL) {
             return 'normal';
-        } elseif ($this->price < 500000) {
+        } elseif ($this->price < self::PRICE_PREMIUM) {
             return 'premium';
         }
         return 'luxury';
     }
 
-    // BUG 2: Magic numbers cho level
     public function getLevelNumber(): int
     {
-        if ($this->level == 'beginner') return 1;
-        if ($this->level == 'intermediate') return 2;
-        if ($this->level == 'advanced') return 3;
-        return 0;
-    }
-
-    // BUG 5: Dead code - method không được gọi
-    public function calculatePopularity(): float
-    {
-        $enrollments = $this->enrollments()->count();
-        $completed = $this->enrollments()->where('status', 'completed')->count();
-        $rating = 4.5; // hardcoded
-        return ($enrollments * 0.3) + ($completed * 0.5) + ($rating * 0.2);
+        return self::LEVEL_NUMBERS[$this->level] ?? 0;
     }
 }
